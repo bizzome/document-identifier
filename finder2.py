@@ -2,38 +2,11 @@ import fitz  # PyMuPDF
 import time
 import cv2
 import numpy as np
-from PIL import Image, UnidentifiedImageError
-import io
+from PIL import Image
 
-NOT_READED = 0
-
-def extract_images_from_pdf(pdf_path):
-    doc = fitz.open(pdf_path)
-    images = []
-    for page_number in range(len(doc)):
-        page = doc[page_number]
-        image_list = page.get_images(full=True)
-        for img_index, img in enumerate(image_list):
-            xref = img[0]
-            base_image = doc.extract_image(xref)
-            image_bytes = base_image["image"]
-            image_ext = base_image["ext"]  # Image extension (ex: 'png', 'jpeg', etc.)
-            
-            # Verify if is a supported image format
-            if image_ext.lower() in ["png", "jpeg", "jpg"]:
-                images.append((page_number + 1, image_bytes))
-    return images
-
-def detect_faces_in_image(image_bytes):
-    global NOT_READED
-    try:
-        image = Image.open(io.BytesIO(image_bytes))
-    except UnidentifiedImageError:
-        NOT_READED = NOT_READED+1
-        return False
-    
+def detect_faces_in_image(image):
     open_cv_image = np.array(image)
-    gray_image = cv2.cvtColor(open_cv_image, cv2.COLOR_BGR2GRAY)
+    gray_image = cv2.cvtColor(open_cv_image, cv2.COLOR_RGB2GRAY)
 
     face_cascade = cv2.CascadeClassifier("classifier/haarcascade_frontalface_default.xml")
     faces = face_cascade.detectMultiScale(gray_image, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
@@ -41,15 +14,25 @@ def detect_faces_in_image(image_bytes):
     return len(faces) > 0
 
 def find_pages_with_faces(pdf_path):
-    images = extract_images_from_pdf(pdf_path)
+    doc = fitz.open(pdf_path)
     pages_with_faces = []
-    for page_number, image_bytes in images:
-        if detect_faces_in_image(image_bytes):
-            pages_with_faces.append(page_number)
+
+    for page_number in range(len(doc)):
+        page = doc.load_page(page_number)
+        mat = fitz.Matrix(2, 2)  # Ajuste o zoom conforme necessário
+        pix = page.get_pixmap(matrix=mat)
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        
+        if detect_faces_in_image(img):
+            pages_with_faces.append(page_number + 1)
+        
+        # Libere a memória da página processada
+        del img, pix, page
+
     return pages_with_faces
 
 if __name__ == "__main__":
-    pdf_path = "data/some_pdf.pdf"
+    pdf_path = "data/0423656-93.1999.8.26.0053.pdf"
     
     start_time = time.time()
     pages_with_faces = find_pages_with_faces(pdf_path)
@@ -63,4 +46,3 @@ if __name__ == "__main__":
         print("No faces detected in the PDF.")
 
     print(f"Execution time: {execution_time:.2f} seconds")
-    print(f"Error reading {NOT_READED} images")
